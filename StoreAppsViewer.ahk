@@ -13,21 +13,21 @@ appsinfo := StdoutToVar(
     (Join ; treat as one-liner
         [console]::InputEncoding = [console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
         ;
-        Get-StartApps | ForEach {
-            $_.AppID + ',' + $_.Name
-        }
-        ;
-        Get-AppxPackage | ForEach {
-            $maa = (Get-AppxPackageManifest $_).Package.Applications.Application
-            ;
-            $_.Name + ',' +
-            $_.PackageFamilyName + ',' +
-            $_.InstallLocation + ',' +
-            $maa.VisualElements.foreach{
-                '' + $_.Square44x44Logo + ' '
-            } + ',' +
-            $maa.foreach{
-                '' + $_.id + ' '
+        Get-AppxPackage
+        | Where IsFramework -eq $False
+        | ForEach {
+            If ($maa = (Get-AppxPackageManifest $_).Package.Applications.Application) {
+                If ($maa.VisualElements.AppListEntry -ne 'none') {
+                    $_.PackageFamilyName + ',' +
+                    $_.InstallLocation + ',' +
+                    $_.PackageFullName + ',' +
+                    $maa.foreach{
+                        '' +
+                        $_.id + '|' +
+                        $_.VisualElements.Square44x44Logo + '|' +
+                        $_.VIsualElements.DisplayName + '|'
+                    }
+                }
             }
         }
     )",
@@ -50,64 +50,73 @@ if (appsinfo.ExitCode != 0) {
 
 phase.Text := "Parsing apps information..."
 msg.Text := ""
-apps := Object()
 appx := Object()
 errs := ""
 for (line in StrSplit(appsinfo.Output, "`n", "`r ")) {
-    csv := StrSplit(line, ",", " ")
+    csv := StrSplit(line, ",", " |")
     if (csv.Length == 0) {
         continue
     }
-    else if (csv.Length == 2) {
-        appid := csv[1]
-        app := apps.%appid% := Object()
-        app.name := csv[2]
-        msg.Text := Format("[{}]=[{}]`r`n", appid, app.name)
-    }
-    else if (csv.Length == 5) {
-        name := csv[1]
-        app := appx.%name% := Object()
-        app.packagefamilyname := csv[2]
-        app.installlocation := csv[3]
-        app.icons := Array()
-        for (icon in StrSplit(csv[4], " ", " ")) {
-            app.icons.Push(icon ? app.installlocation . "\" . icon : "")
+    else if (csv.Length == 4) {
+        packagefamilyname := csv[1]
+        app := appx.%packagefamilyname% := Object()
+        app.installlocation := csv[2]
+        app.packagefullname := csv[3]
+
+        app.triplets := Array()
+        triplets := StrSplit(csv[4], "|", " ")
+        if (triplets.Length == 0 or Mod(triplets.Length, 3) != 0) {
+            errs .= Format("parse error: [{}]`r`n", line)
         }
-        app.ids := Array()
-        for (id in StrSplit(csv[5], " ", " ")) {
-            app.ids.Push(id)
+        Loop(triplets.Length / 3) {
+            maybeRes := triplets[(A_Index-1)*3+3]
+            if (SubStr(maybeRes, 1, 12) == "ms-resource:") {
+                if (!loadIndirect(app.packagefullname, &maybeRes)) {
+                    maybeRes := RegExReplace(
+                        maybeRes,
+                        "^ms-resource:/*",
+                        "ms-resource:Resources/"
+                    )
+                    if (!loadIndirect(app.packagefullname, &maybeRes)) {
+                        errs .= Format("can't load indirect string: {}`r`n", line)
+                        maybeRes := False ; failure
+                    }
+                }
+            }
+            loadIndirect(pkgfull, &res) {
+                static out := Buffer(255, 0)
+                failed := DllCall(
+                    "Shlwapi\SHLoadIndirectString",
+                    "Str", "@{" . pkgfull . "?" . res . "}",
+                    "Ptr", out,
+                    "UInt", 253,
+                    "Ptr*", 0
+                )
+                NumPut("Short", 0, out, 253)
+                return failed ? False : (res := StrGet(out))
+            }
+            app.triplets.Push({
+                id: triplets[(A_Index-1)*3+1],
+                icon: triplets[(A_Index-1)*3+2],
+                name: maybeRes ?? triplets[(A_Index-1)*3+3]
+            })
         }
-        msg.Text := Format(
-            "[{}]=[{}{}] ({})`r`n",
-            name,
-            app.packagefamilyname,
-            (app.ids.Has(1) && app.ids[1]) ? "!" . app.ids[1] : "",
-            app.icons.Has(1) ? app.icons[1] : ""
-        )
+        for (i in app.triplets) {
+            msg.Text := Format(
+                "[{}]=[{}!{}] ({})`r`n",
+                i.name,
+                packagefamilyname,
+                i.id,
+                i.icon
+            )
+        }
     }
     else {
-        errs .= Format("parse error: [{}]`r`n", line)
-    }
-}
-
-; copy properties to apps
-for (name, x in appx.OwnProps()) {
-    for (id in (x.ids.Length ? x.ids : [""])) {
-        appid := x.packagefamilyname . (id ? "!" . id : "")
-        if (apps.HasOwnProp(appid)) {
-            apps.%appid%.installlocation := x.installlocation
-            apps.%appid%.icon := x.icons.Has(A_Index) ? x.icons[A_Index] : ""
-        }
+        errs .= Format("parse error: [{}] length={}`r`n", line, csv.Length)
     }
 }
 mygui.Destroy()
 
-;; non-store apps
-;for (appid in apps) {
-;    if (!apps.%appid%.HasOwnProp("installlocation")) {
-;        errs .= Format("app doesn't have installlocation: {}`r`n", i)
-;    }
-;}
 if (errs) {
     MsgBox(errs)
 }
@@ -118,12 +127,12 @@ lv := mygui.Add(
     "r20 w700", ; initial dimensions
     ["Name", "Executable", "Folder"]
 )
-icons := IL_Create(50, 20) ; may be optimized more
+icons := IL_Create(100, 20) ; may be optimized more
 lv.SetImageList(icons)
 list := Array()
-for (appid, app in apps.OwnProps()) {
-    if (app.HasOwnProp("installlocation")) {
-        icon := findIcon(app.icon)
+for (pfn, app in appx.OwnProps()) {
+    for (i in app.triplets) {
+        icon := i.icon ? findIcon(app.installlocation . "\" . i.icon) : ""
         findIcon(path) {
             if (FileExist(path)) {
                 return path
@@ -134,16 +143,13 @@ for (appid, app in apps.OwnProps()) {
                 return A_LoopFileFullPath
             }
         }
-        list.Push({
-            icon: IL_Add(icons, icon, 0xFFFFFF, True), ; mask white
-            name: app.name,
-            appid: appid,
-            installlocation: app.installlocation
-        })
+        lv.Add(
+            "Icon" . IL_Add(icons, icon, 0xFFFFFF, True),
+            i.name,
+            pfn . "!" . i.id,
+            app.installlocation
+        )
     }
-}
-for (i in list) {
-    lv.Add("Icon" . i.icon, i.name, i.appid, i.installlocation)
 }
 lv.ModifyCol(1)
 lv.ModifyCol(2, 250)
