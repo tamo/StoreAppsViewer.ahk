@@ -7,9 +7,7 @@ mygui.SetFont("norm")
 msg := mygui.AddText("wp y+10 h500", "This may take minutes")
 mygui.Show()
 
-While (!(appsinfo := getAppsInfo(msg))) {
-    msg.Text := "Restarting"
-}
+appsinfo := getAppsInfo(msg)
 
 phase.Text := "Parsing apps information..."
 msg.Text := ""
@@ -17,9 +15,11 @@ appx := getAppx(msg, appsinfo.Output)
 mygui.Destroy()
 
 mygui := Gui("+Resize")
+lvy := 0, lvh := 500
 lv := mygui.Add(
     "ListView",
-    "-Multi r20 w700", ; disable multiple selection
+    ; disable multiple selection
+    Format("-Multi x0 y{} w700 h{}", lvy, lvh - lvy),
     ["DisplayName", "Executable", "Folder", "FullName"]
 )
 listApps(lv, appx, &icons)
@@ -30,7 +30,8 @@ lv.ModifyCol(3, 300)
 mygui.OnEvent("Size", resizeLV)
 resizeLV(g, minmax, w, h) {
     global lv
-    lv.Move(,, w-20, h-15)
+    global lvy, lvh := h
+    lv.Move(, , w, lvh - lvy)
 }
 
 lv.OnEvent("DoubleClick", runItem)
@@ -71,10 +72,11 @@ showContext(v, item, isRightClick, x, y) {
     }
 
     reload(lv, *) {
+        global lvy, lvh
         global mygui
         global icons
+        lv.Move(, lvy := 20, , lvh - lvy)
         msg := mygui.AddText("wp x0 y0", "Reloading...")
-        msg.Redraw()
         appsinfo := getAppsInfo(msg)
         appx := getAppx(msg, appsinfo.Output)
         msg.Text := ""
@@ -82,6 +84,7 @@ showContext(v, item, isRightClick, x, y) {
         lv.Delete()
         IL_Destroy(icons)
         listApps(lv, appx, &icons)
+        lv.Move(, lvy := 0, , lvh - lvy)
         lv.Redraw()
     }
 
@@ -107,22 +110,20 @@ getAppsInfo(msg) {
         "pwsh -NoProfile -Command " .
         "
         (Join ; treat as one-liner
-            [console]::InputEncoding = [console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+            [console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
             ;
             Get-AppxPackage
             | Where IsFramework -eq $False
             | ForEach {
-                If ($maa = (Get-AppxPackageManifest $_).Package.Applications.Application) {
-                    If ($maa.VisualElements.AppListEntry -ne 'none') {
-                        $_.PackageFamilyName + ',' +
-                        $_.InstallLocation + ',' +
-                        $_.PackageFullName + ',' +
-                        $maa.foreach{
-                            '' +
-                            $_.id + '|' +
-                            $_.VisualElements.Square44x44Logo + '|' +
-                            $_.VIsualElements.DisplayName + '|'
-                        }
+                $maa = (Get-AppxPackageManifest $_).Package.Applications.Application;
+                If ($maa -And $maa.VisualElements.AppListEntry -ne 'none') {
+                    $_.PackageFamilyName + ',' +
+                    $_.InstallLocation + ',' +
+                    $_.PackageFullName + ',' +
+                    $maa.foreach{
+                        $_.Id + '|' +
+                        $_.VisualElements.Square44x44Logo + '|' +
+                        $_.VisualElements.DisplayName + '|'
                     }
                 }
             }
@@ -140,9 +141,12 @@ getAppsInfo(msg) {
         ) == "Yes") {
             RunWait("winget install --id Microsoft.Powershell --source winget")
             MsgBox("Restart", "Perhaps PowerShell has been installed")
-            return False
+            msg.Text := "Restarting"
+            return getAppsInfo(msg)
         }
-        ExitApp()
+        else {
+            ExitApp()
+        }
     }
     return info
 }
@@ -160,18 +164,18 @@ getAppx(msg, lines) {
             app := appx.%packagefamilyname% := Object()
             app.installlocation := csv[2]
             app.packagefullname := csv[3]
-    
+
             app.triplets := Array()
             triplets := StrSplit(csv[4], "|", " ")
             if (triplets.Length == 0 or Mod(triplets.Length, 3) != 0) {
                 errs .= Format("parse error: [{}]`r`n", line)
             }
-            Loop(triplets.Length / 3) {
-                maybeRes := resolveRes(app, triplets[(A_Index-1)*3+3], &errs)
+            Loop (triplets.Length / 3) {
+                maybeRes := resolveRes(app, triplets[(A_Index - 1) * 3 + 3], &errs)
                 app.triplets.Push({
-                    id: triplets[(A_Index-1)*3+1],
-                    icon: triplets[(A_Index-1)*3+2],
-                    name: maybeRes ?? triplets[(A_Index-1)*3+3]
+                    id: triplets[(A_Index - 1) * 3 + 1],
+                    icon: triplets[(A_Index - 1) * 3 + 2],
+                    name: maybeRes ?? triplets[(A_Index - 1) * 3 + 3]
                 })
             }
             for (i in app.triplets) {
@@ -195,18 +199,19 @@ getAppx(msg, lines) {
 
     ; Translate ms-resource:[/][/]RESOURCENAME
     resolveRes(app, maybeRes, &errs) {
-        result := maybeRes
-        if (SubStr(maybeRes, 1, 12) == "ms-resource:") {
-            if (!(result := loadIndirect(app.packagefullname, maybeRes))) {
-                tweakedRes := RegExReplace(
-                    maybeRes,
-                    "^ms-resource:/*",
-                    "ms-resource:Resources/"
-                )
-                if (!(result := loadIndirect(app.packagefullname, tweakedRes))) {
-                    errs .= Format("can't load indirect string: {}`r`n", maybeRes)
-                }
-            }
+        if (SubStr(maybeRes, 1, 12) != "ms-resource:") {
+            return maybeRes
+        }
+        if (result := loadIndirect(app.packagefullname, maybeRes)) {
+            return result
+        }
+        tweakedRes := RegExReplace(
+            maybeRes,
+            "^ms-resource:/*",
+            "ms-resource:Resources/"
+        )
+        if (!(result := loadIndirect(app.packagefullname, tweakedRes))) {
+            errs .= Format("can't load indirect string: {}`r`n", maybeRes)
         }
         return result
     }
@@ -246,7 +251,7 @@ listApps(lv, appx, &icons) {
         if (FileExist(path)) {
             return path
         }
-        SplitPath(path,, &dir, &ext, &name)
+        SplitPath(path, , &dir, &ext, &name)
         ; can contain various options like "target-*"
         Loop Files Format("{}\{}.*.{}", dir, name, ext), "F" {
             ; too lazy to find the best one
@@ -278,42 +283,42 @@ listApps(lv, appx, &icons) {
 ; ..............: Oct. 08, 2022 - Exceptions management and handles closure fix. Thanks to lexikos and iseahound.
 ; ..............: Added gMsg.
 ; ----------------------------------------------------------------------------------------------------------------------
-StdoutToVar(sCmd, sDir:="", sEnc:="CP0", gMsg:=False) {
+StdoutToVar(sCmd, sDir := "", sEnc := "CP0", gMsg := False) {
     ; Create 2 buffer-like objects to wrap the handles to take advantage of the __Delete meta-function.
     oHndStdoutRd := { Ptr: 0, __Delete: delete(this) => DllCall("CloseHandle", "Ptr", this) }
     oHndStdoutWr := { Base: oHndStdoutRd }
-    
-    If !DllCall( "CreatePipe"
-               , "PtrP" , oHndStdoutRd
-               , "PtrP" , oHndStdoutWr
-               , "Ptr"  , 0
-               , "UInt" , 0 )
-        Throw OSError(,, "Error creating pipe.")
-    If !DllCall( "SetHandleInformation"
-               , "Ptr"  , oHndStdoutWr
-               , "UInt" , 1
-               , "UInt" , 1 )
-        Throw OSError(,, "Error setting handle information.")
 
-    PI := Buffer(A_PtrSize == 4 ? 16 : 24,  0)
+    If !DllCall("CreatePipe"
+        , "PtrP", oHndStdoutRd
+        , "PtrP", oHndStdoutWr
+        , "Ptr", 0
+        , "UInt", 0)
+        Throw OSError(, , "Error creating pipe.")
+    If !DllCall("SetHandleInformation"
+        , "Ptr", oHndStdoutWr
+        , "UInt", 1
+        , "UInt", 1)
+        Throw OSError(, , "Error setting handle information.")
+
+    PI := Buffer(A_PtrSize == 4 ? 16 : 24, 0)
     SI := Buffer(A_PtrSize == 4 ? 68 : 104, 0)
-    NumPut( "UInt", SI.Size,          SI,  0 )
-    NumPut( "UInt", 0x100,            SI, A_PtrSize == 4 ? 44 : 60 )
-    NumPut( "Ptr",  oHndStdoutWr.Ptr, SI, A_PtrSize == 4 ? 60 : 88 )
-    NumPut( "Ptr",  oHndStdoutWr.Ptr, SI, A_PtrSize == 4 ? 64 : 96 )
+    NumPut("UInt", SI.Size, SI, 0)
+    NumPut("UInt", 0x100, SI, A_PtrSize == 4 ? 44 : 60)
+    NumPut("Ptr", oHndStdoutWr.Ptr, SI, A_PtrSize == 4 ? 60 : 88)
+    NumPut("Ptr", oHndStdoutWr.Ptr, SI, A_PtrSize == 4 ? 64 : 96)
 
-    If !DllCall( "CreateProcess"
-               , "Ptr"  , 0
-               , "Str"  , sCmd
-               , "Ptr"  , 0
-               , "Ptr"  , 0
-               , "Int"  , True
-               , "UInt" , 0x08000000
-               , "Ptr"  , 0
-               , "Ptr"  , sDir ? StrPtr(sDir) : 0
-               , "Ptr"  , SI
-               , "Ptr"  , PI )
-        Throw OSError(,, "Error creating process.")
+    If !DllCall("CreateProcess"
+        , "Ptr", 0
+        , "Str", sCmd
+        , "Ptr", 0
+        , "Ptr", 0
+        , "Int", True
+        , "UInt", 0x08000000
+        , "Ptr", 0
+        , "Ptr", sDir ? StrPtr(sDir) : 0
+        , "Ptr", SI
+        , "Ptr", PI)
+        Throw OSError(, , "Error creating process.")
 
     ; The write pipe must be closed before reading the stdout so we release the object.
     ; The reading pipe will be released automatically on function return.
@@ -321,35 +326,35 @@ StdoutToVar(sCmd, sDir:="", sEnc:="CP0", gMsg:=False) {
 
     ; Before reading, we check if the pipe has been written to, so we avoid freezings.
     nAvail := 0, nLen := 0
-    While DllCall( "PeekNamedPipe"
-                 , "Ptr"   , oHndStdoutRd
-                 , "Ptr"   , 0
-                 , "UInt"  , 0
-                 , "Ptr"   , 0
-                 , "UIntP" , &nAvail
-                 , "Ptr"   , 0 ) != 0
+    While DllCall("PeekNamedPipe"
+        , "Ptr", oHndStdoutRd
+        , "Ptr", 0
+        , "UInt", 0
+        , "Ptr", 0
+        , "UIntP", &nAvail
+        , "Ptr", 0) != 0
     {
         ; If the pipe buffer is empty, sleep and continue checking.
         If !nAvail && Sleep(100)
             Continue
-        cBuf := Buffer(nAvail+1)
-        DllCall( "ReadFile"
-               , "Ptr"  , oHndStdoutRd
-               , "Ptr"  , cBuf
-               , "UInt" , nAvail
-               , "PtrP" , &nLen
-               , "Ptr"  , 0 )
+        cBuf := Buffer(nAvail + 1)
+        DllCall("ReadFile"
+            , "Ptr", oHndStdoutRd
+            , "Ptr", cBuf
+            , "UInt", nAvail
+            , "PtrP", &nLen
+            , "Ptr", 0)
         newStr := StrGet(cBuf, nLen, sEnc)
         sOutput .= newStr
         If gMsg
             gMsg.Text := newStr
     }
-    
+
     ; Get the exit code, close all process handles and return the output object.
-    DllCall( "GetExitCodeProcess"
-           , "Ptr"   , NumGet(PI, 0, "Ptr")
-           , "UIntP" , &nExitCode:=0 )
-    DllCall( "CloseHandle", "Ptr", NumGet(PI, 0, "Ptr") )
-    DllCall( "CloseHandle", "Ptr", NumGet(PI, A_PtrSize, "Ptr") )
-    Return { Output: sOutput, ExitCode: nExitCode } 
+    DllCall("GetExitCodeProcess"
+        , "Ptr", NumGet(PI, 0, "Ptr")
+        , "UIntP", &nExitCode := 0)
+    DllCall("CloseHandle", "Ptr", NumGet(PI, 0, "Ptr"))
+    DllCall("CloseHandle", "Ptr", NumGet(PI, A_PtrSize, "Ptr"))
+    Return { Output: sOutput, ExitCode: nExitCode }
 }
