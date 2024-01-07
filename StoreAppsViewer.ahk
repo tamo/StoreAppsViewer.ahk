@@ -89,8 +89,17 @@ showContext(v, item, isRightClick, x, y) {
     }
 
     uninstall(full, lv, item, *) {
-        RunWait(Format('pwsh -Command "Remove-AppxPackage -Confirm {}"', full))
-        kept := StdoutToVar(Format('pwsh -Command "Get-AppxPackageManifest {}"', full))
+        pwsh := "pwsh -NoProfile -Command"
+        pwcfg := "
+            (Join ; treat as one-liner
+                [console]::OutputEncoding = [System.Text.UTF8Encoding]::new();
+                If (! (Get-Command -Module Appx)) {
+                    $ProgressPreference = 'Ignore';
+                    Import-Module -UseWindowsPowerShell AppX 3>$null
+                }
+            )"
+        RunWait(Format('{} "{}; Remove-AppxPackage -Confirm {}"', pwsh, pwcfg, full))
+        kept := StdoutToVar(Format('{} "{}; Get-AppxPackageManifest {}"', pwsh, pwcfg, full))
         if (kept.ExitCode == 0 and kept.Output == "") {
             lv.Delete(item)
         }
@@ -109,9 +118,12 @@ getAppsInfo(msg) {
     info := StdoutToVar(
         "pwsh -NoProfile -Command " .
         "
-        (Join ; treat as one-liner
-            [console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
-            ;
+        (Join
+            [console]::OutputEncoding = [System.Text.UTF8Encoding]::new();
+            If (! (Get-Command -Module Appx)) {
+                $ProgressPreference = 'Ignore';
+                Import-Module -UseWindowsPowerShell AppX 3>$null
+            }
             Get-AppxPackage
             | Where IsFramework -eq $False
             | ForEach {
