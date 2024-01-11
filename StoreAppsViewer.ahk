@@ -330,7 +330,8 @@ StdoutToVar(sCmd, sDir := "", sEnc := "CP0", gMsg := False) {
         , "Ptr", sDir ? StrPtr(sDir) : 0
         , "Ptr", SI
         , "Ptr", PI)
-        Throw OSError(, , "Error creating process.")
+        ; Throw OSError(, , "Error creating process.")
+        Return { Output: "Error creating process. Probably pwsh is not installed.", ExitCode: -1 }
 
     ; The write pipe must be closed before reading the stdout so we release the object.
     ; The reading pipe will be released automatically on function return.
