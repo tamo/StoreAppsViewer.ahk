@@ -1,0 +1,46 @@
+name: ahk2exe
+
+on: [push]
+
+env:
+    ahkver: 2.0.11
+    a2ever: 1.1.37.01c
+    src: StoreAppsViewer.ahk
+    base: 64
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Fetch AutoHotkey
+      run: |
+        curl -LJo ahk.zip https://github.com/AutoHotkey/AutoHotkey/releases/download/v${{ env.ahkver }}/AutoHotkey_${{ env.ahkver }}.zip
+        7z x ahk.zip
+        ls
+
+    - name: Fetch Ahk2Exe
+      run: |
+        curl -LJo a2e.zip https://github.com/AutoHotkey/Ahk2Exe/releases/download/Ahk2Exe${{ env.a2ever }}/Ahk2Exe${{ env.a2ever }}.zip
+        7z x a2e.zip
+        ls
+
+    - name: Run Ahk2Exe
+      run: >
+        ./Ahk2Exe.exe
+        /in ${{ env.src }}
+        /out ${{ env.src }}.${{ env.base }}bit.exe
+        /base AutoHotkey${{ env.base }}.exe
+
+    - run: ls ${{ env.src }}.${{ env.base}}bit.exe
+
+    - name: Release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: ${{ env.src }}.${{ env.base }}bit.exe
+      env:
+        GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
