@@ -35,7 +35,7 @@ jobs:
         /out ${{ env.src }}.${{ env.base }}bit.exe
         /base AutoHotkey${{ env.base }}.exe
 
-    - run: ls ${{ env.src }}.${{ env.base}}bit.exe
+    - run: ls ${{ env.src }}.${{ env.base }}bit.exe
 
     - name: Release
       uses: softprops/action-gh-release@v1
@@ -43,4 +43,4 @@ jobs:
       with:
         files: ${{ env.src }}.${{ env.base }}bit.exe
       env:
-        GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
