@@ -3,8 +3,6 @@ name: ahk2exe
 on: [push]
 
 env:
-    ahkver: 2.0.11
-    a2ever: 1.1.37.01c
     src: StoreAppsViewer.ahk
     base: 64
 
@@ -16,17 +14,32 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    - name: Get URLs
+      run: |
+        function latesturl ($repo, $type) { `
+          curl -H "Accept: application/vnd.github.v3+json" -s `
+            https://api.github.com/repos/${repo}/releases/latest `
+          | jq -r ( `
+            '.assets[] | select(.content_type == \"{0}\") | .browser_download_url' `
+            -f ${type} `
+          ) `
+        }
+        $AHKURL=latesturl "AutoHotkey/AutoHotkey"  "application/zip"
+        echo "AHKURL=${AHKURL}" >> ${env:GITHUB_ENV}
+        $A2EURL=latesturl "AutoHotkey/Ahk2Exe" "application/x-zip-compressed"
+        echo "A2EURL=${A2EURL}" >> ${env:GITHUB_ENV}
+
     - name: Fetch AutoHotkey
       run: |
-        curl -LJo ahk.zip https://github.com/AutoHotkey/AutoHotkey/releases/download/v${{ env.ahkver }}/AutoHotkey_${{ env.ahkver }}.zip
+        curl -LJo ahk.zip ${env:AHKURL}
         7z x ahk.zip
-        ls
+        ls AutoHotkey${{ env.base }}.exe
 
     - name: Fetch Ahk2Exe
       run: |
-        curl -LJo a2e.zip https://github.com/AutoHotkey/Ahk2Exe/releases/download/Ahk2Exe${{ env.a2ever }}/Ahk2Exe${{ env.a2ever }}.zip
+        curl -LJo a2e.zip ${env:A2EURL}
         7z x a2e.zip
-        ls
+        ls Ahk2Exe.exe
 
     - name: Run Ahk2Exe
       run: >
