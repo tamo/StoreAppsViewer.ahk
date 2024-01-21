@@ -2,10 +2,6 @@ name: ahk2exe
 
 on: [push]
 
-env:
-    src: StoreAppsViewer.ahk
-    base: 64
-
 jobs:
   build:
     runs-on: windows-latest
@@ -14,46 +10,28 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Get URLs
-      run: |
-        function latesturl ($repo, $type) { `
-          curl -H "Accept: application/vnd.github.v3+json" -s `
-            https://api.github.com/repos/${repo}/releases/latest `
-          | jq -r ( `
-            '.assets[] | select(.content_type == \"{0}\") | .browser_download_url' `
-            -f ${type} `
-          ) `
-        }
-        $AHKURL=latesturl "AutoHotkey/AutoHotkey"  "application/zip"
-        echo "AHKURL=${AHKURL}" >> ${env:GITHUB_ENV}
-        $A2EURL=latesturl "AutoHotkey/Ahk2Exe" "application/x-zip-compressed"
-        echo "A2EURL=${A2EURL}" >> ${env:GITHUB_ENV}
+    - name: Ahk2Exe (32bit)
+      uses: tamo/action-Ahk2Exe@main
+      with:
+        src: StoreAppsViewer.ahk
 
-    - name: Fetch AutoHotkey
-      run: |
-        curl -LJo ahk.zip ${env:AHKURL}
-        7z x ahk.zip
-        ls AutoHotkey${{ env.base }}.exe
+    - run: ls StoreAppsViewer.exe
 
-    - name: Fetch Ahk2Exe
-      run: |
-        curl -LJo a2e.zip ${env:A2EURL}
-        7z x a2e.zip
-        ls Ahk2Exe.exe
+    - name: Ahk2Exe (64bit)
+      uses: tamo/action-Ahk2Exe@main
+      with:
+        src: StoreAppsViewer.ahk
+        base: _ahktmp/AutoHotkey64.exe
+        opt: /out StoreAppsViewer64.exe
 
-    - name: Run Ahk2Exe
-      run: >
-        ./Ahk2Exe.exe
-        /in ${{ env.src }}
-        /out ${{ env.src }}.${{ env.base }}bit.exe
-        /base AutoHotkey${{ env.base }}.exe
-
-    - run: ls ${{ env.src }}.${{ env.base }}bit.exe
+    - run: ls StoreAppsViewer64.exe
 
     - name: Release
       uses: softprops/action-gh-release@v1
       if: startsWith(github.ref, 'refs/tags/')
       with:
-        files: ${{ env.src }}.${{ env.base }}bit.exe
+        files: |
+          StoreAppsViewer.exe
+          StoreAppsViewer64.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
