@@ -1,4 +1,9 @@
 #Requires AutoHotkey v2.0
+#Warn
+
+;@Ahk2Exe-SetName        StoreAppsViewer.ahk
+;@Ahk2Exe-SetVersion     0.2
+;@Ahk2Exe-SetDescription StoreAppsViewer.ahk - ListView for pwsh Get-AppxPackage*
 
 mygui := Gui("+Resize")
 mygui.SetFont("bold")
@@ -76,14 +81,14 @@ showContext(v, item, isRightClick, x, y) {
         global mygui
         global icons
         lv.Move(, lvy := 20, , lvh - lvy)
-        msg := mygui.AddText("wp x0 y0", "Reloading...")
-        appsinfo := getAppsInfo(msg)
-        appx := getAppx(msg, appsinfo.Output)
-        msg.Text := ""
-        msg.Opt("+Hidden")
+        tmpmsg := mygui.AddText("wp x0 y0", "Reloading...")
+        tmpappsinfo := getAppsInfo(tmpmsg)
+        tmpappx := getAppx(tmpmsg, tmpappsinfo.Output)
+        tmpmsg.Text := ""
+        tmpmsg.Opt("+Hidden")
         lv.Delete()
         IL_Destroy(icons)
-        listApps(lv, appx, &icons)
+        listApps(lv, tmpappx, &icons)
         lv.Move(, lvy := 0, , lvh - lvy)
         lv.Redraw()
     }
@@ -164,7 +169,7 @@ getAppsInfo(msg) {
 }
 
 getAppx(msg, lines) {
-    appx := Object()
+    retx := Object()
     errs := ""
     for (line in StrSplit(lines, "`n", "`r ")) {
         csv := StrSplit(line, ",", " |")
@@ -173,7 +178,7 @@ getAppx(msg, lines) {
         }
         else if (csv.Length == 4) {
             packagefamilyname := csv[1]
-            app := appx.%packagefamilyname% := Object()
+            app := retx.%packagefamilyname% := Object()
             app.installlocation := csv[2]
             app.packagefullname := csv[3]
 
@@ -207,7 +212,7 @@ getAppx(msg, lines) {
     if (errs) {
         MsgBox(errs)
     }
-    return appx
+    return retx
 
     ; Translate ms-resource:[/][/]RESOURCENAME
     resolveRes(app, maybeRes, &errs) {
